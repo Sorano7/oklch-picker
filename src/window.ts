@@ -7,34 +7,34 @@ const DEFAULT_HEIGHT = 360;
 
 // Frameless window: no native resize border, so we drive it via Tauri API.
 export function initWindowControls(): void {
-  const win = getCurrentWindow();
+    const win = getCurrentWindow();
 
-  document.querySelector("#close-btn")?.addEventListener("click", () => {
-    void win.close();
-  });
-
-  document.querySelector("#reset-btn")?.addEventListener("click", () => {
-    void win.setSize(new LogicalSize(DEFAULT_WIDTH, DEFAULT_HEIGHT));
-  });
-
-  document.querySelector("#min-btn")?.addEventListener("click", () => {
-    void win.minimize();
-  });
-
-  const pinBtn = document.querySelector<HTMLElement>("#pin-btn");
-  let pinned = true; // matches alwaysOnTop in tauri.conf.json
-  pinBtn?.addEventListener("click", () => {
-    pinned = !pinned;
-    pinBtn.classList.toggle("active", pinned);
-    pinBtn.title = pinned ? "Always on top: on" : "Always on top: off";
-    void win.setAlwaysOnTop(pinned);
-  });
-
-  document.querySelectorAll<HTMLElement>("[data-resize]").forEach((el) => {
-    el.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      void win.startResizeDragging(el.dataset.resize as never);
+    document.querySelector("#close-btn")?.addEventListener("click", () => {
+        void win.close();
     });
-  });
+
+    document.querySelector("#reset-btn")?.addEventListener("click", () => {
+        void win.setSize(new LogicalSize(DEFAULT_WIDTH, DEFAULT_HEIGHT));
+    });
+
+    document.querySelector("#min-btn")?.addEventListener("click", () => {
+        void win.minimize();
+    });
+
+    const pinBtn = document.querySelector<HTMLElement>("#pin-btn");
+    let pinned = true; // matches alwaysOnTop in tauri.conf.json
+    pinBtn?.addEventListener("click", () => {
+        pinned = !pinned;
+        pinBtn.classList.toggle("active", pinned);
+        pinBtn.title = pinned ? "Always on top: on" : "Always on top: off";
+        void win.setAlwaysOnTop(pinned);
+    });
+
+    document.querySelectorAll<HTMLElement>("[data-resize]").forEach((el) => {
+        el.addEventListener("pointerdown", (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            void win.startResizeDragging(el.dataset.resize as never);
+        });
+    });
 }
