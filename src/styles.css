@@ -189,6 +189,23 @@ body {
     color: #5ec27a;
 }
 
+/* ---- Compact (pinned) mode ---- */
+body.compact #titlebar {
+  pointer-events: none;
+}
+
+body.compact .win-btn {
+  pointer-events: auto;
+}
+
+body.compact .win-btn:not(#settings-btn):not(#compact-btn) {
+  display: none;
+}
+
+body.compact .rz {
+  display: none;
+}
+
 /* ---- Settings panel ---- */
 #settings-panel {
     position: fixed;

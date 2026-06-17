@@ -10,12 +10,15 @@ interface CspSettings {
 export function initSettings(onSave: () => void): void {
     const panel = document.querySelector<HTMLElement>("#settings-panel")!;
     const settingsBtn = document.querySelector<HTMLButtonElement>("#settings-btn")!;
-    const closeBtn = document.querySelector<HTMLButtonElement>("#s-close")!;
     const saveBtn = document.querySelector<HTMLButtonElement>("#s-save")!;
     const hostEl = document.querySelector<HTMLInputElement>("#s-host")!;
     const portEl = document.querySelector<HTMLInputElement>("#s-port")!;
     const tokenEl = document.querySelector<HTMLInputElement>("#s-token")!;
     const sessionEl = document.querySelector<HTMLInputElement>("#s-session")!;
+
+    function isOpen() {
+        return panel.classList.contains("open");
+    }
 
     async function open() {
         const s = await invoke<CspSettings>("csp_get_settings");
@@ -49,8 +52,7 @@ export function initSettings(onSave: () => void): void {
         }
     }
 
-    settingsBtn.addEventListener("click", open);
-    closeBtn.addEventListener("click", close);
+    settingsBtn.addEventListener("click", () => { isOpen() ? close() : void open(); });
     saveBtn.addEventListener("click", () => void save());
 
     panel.addEventListener("keydown", (e) => {

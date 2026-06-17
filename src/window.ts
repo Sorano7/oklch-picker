@@ -30,6 +30,15 @@ export function initWindowControls(): void {
         void win.setAlwaysOnTop(pinned);
     });
 
+    const compactBtn = document.querySelector<HTMLElement>("#compact-btn");
+    let compact = false;
+    compactBtn?.addEventListener("click", () => {
+        compact = !compact;
+        document.body.classList.toggle("compact", compact);
+        compactBtn.classList.toggle("active", compact);
+        compactBtn.title = `Pin window: ${compact ? "on" : "off"}`;
+    });
+
     document.querySelectorAll<HTMLElement>("[data-resize]").forEach((el) => {
         el.addEventListener("pointerdown", (e) => {
             if (e.button !== 0) return;
