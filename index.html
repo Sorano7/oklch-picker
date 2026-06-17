@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OKLCH</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <div id="titlebar" data-tauri-drag-region>
+      <span class="title" data-tauri-drag-region>OKLCH</span>
+      <div class="win-buttons">
+        <button id="lock-btn" class="win-btn" title="Lock selection to in-gamut: on">🔒</button>
+        <button id="pin-btn" class="win-btn active" title="Always on top: on">⊙</button>
+        <button id="reset-btn" class="win-btn" title="Reset window size">▢</button>
+        <button id="min-btn" class="win-btn" title="Minimize">–</button>
+        <button id="close-btn" class="win-btn close" title="Close">✕</button>
+      </div>
+    </div>
+
+    <div id="picker-wrap">
+      <canvas id="picker-canvas"></canvas>
+    </div>
+
+    <div id="footer" title="Copy hex code">
+      <span id="swatch"></span>
+      <span id="hex">#000000</span>
+      <span id="copy-hint">click to copy</span>
+    </div>
+
+    <!-- Frameless resize handles -->
+    <div class="rz rz-n" data-resize="North"></div>
+    <div class="rz rz-s" data-resize="South"></div>
+    <div class="rz rz-e" data-resize="East"></div>
+    <div class="rz rz-w" data-resize="West"></div>
+    <div class="rz rz-ne" data-resize="NorthEast"></div>
+    <div class="rz rz-nw" data-resize="NorthWest"></div>
+    <div class="rz rz-se" data-resize="SouthEast"></div>
+    <div class="rz rz-sw" data-resize="SouthWest"></div>
+  </body>
+</html>
