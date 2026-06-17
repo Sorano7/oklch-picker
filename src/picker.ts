@@ -163,10 +163,10 @@ export class Picker {
     c.clearRect(0, 0, this.size, this.size);
 
     const { cx, cy, outerR } = this;
-    // Hue increases clockwise from East (screen angle = hue).
+    // Red at West, hue increases clockwise (screen angle = hue + 180°).
     for (let h = 0; h < 360; h++) {
-      const a0 = (h * Math.PI) / 180 - 0.02;
-      const a1 = ((h + 1) * Math.PI) / 180 + 0.02;
+      const a0 = (h * Math.PI) / 180 + Math.PI - 0.02;
+      const a1 = ((h + 1) * Math.PI) / 180 + Math.PI + 0.02;
       c.beginPath();
       c.moveTo(cx, cy);
       c.arc(cx, cy, outerR, a0, a1);
@@ -344,7 +344,7 @@ export class Picker {
 
     for (const [start, end] of this.secArcRuns) {
       ctx.beginPath();
-      ctx.arc(cx, cy, r, (start * Math.PI) / 180, (end * Math.PI) / 180);
+      ctx.arc(cx, cy, r, start * Math.PI / 180 + Math.PI, end * Math.PI / 180 + Math.PI);
       ctx.stroke();
     }
   }
@@ -391,7 +391,7 @@ export class Picker {
 
   private drawRingMarker(d: number): void {
     const midR = (this.outerR + this.innerEdge) / 2;
-    const ang = (this.color.h * Math.PI) / 180;
+    const ang = (this.color.h * Math.PI) / 180 + Math.PI;
     const x = (this.cx + midR * Math.cos(ang)) * d;
     const y = (this.cy + midR * Math.sin(ang)) * d;
     this.drawMarker(x, y, Math.max(4, this.size * 0.02) * d);
@@ -462,7 +462,7 @@ export class Picker {
   private applyPoint(x: number, y: number): void {
     if (this.dragMode === "ring") {
       const deg = (Math.atan2(y - this.cy, x - this.cx) * 180) / Math.PI;
-      this.color.h = (deg + 360) % 360;
+      this.color.h = (deg - 180 + 360) % 360;
       this.renderSquare();
     } else if (this.dragMode === "square") {
       let u = clamp((x - (this.cx - this.half)) / this.squareSide, 0, 1);
