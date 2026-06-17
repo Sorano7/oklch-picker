@@ -239,14 +239,24 @@ private maxChroma(l: number, h: number): number {
 private computeBoundary(): void {
     const h = this.color.h;
     const arr = new Array<number>(BOUNDARY_SAMPLES);
-    const pts = new Array<[number, number]>(BOUNDARY_SAMPLES);
     for (let i = 0; i < BOUNDARY_SAMPLES; i++) {
-        const l = i / (BOUNDARY_SAMPLES - 1);
-        const u = this.maxChroma(l, h) / C_MAX;
-        arr[i] = u;
-        pts[i] = [u, l];
+        arr[i] = this.maxChroma(i / (BOUNDARY_SAMPLES - 1), h) / C_MAX;
     }
+
+    let minIdx = 0;
+    for (let i = 1; i < BOUNDARY_SAMPLES; i++) {
+        if (arr[i] <= arr[i - 1]) minIdx = i;
+        else break;
+    }
+    if (minIdx > 0) {
+        const minVal = arr[minIdx];
+        for (let i = 0; i < minIdx; i++) arr[i] = minVal * (i / minIdx);
+    }
+
     this.boundary = arr;
+    const pts: Array<[number, number]> = arr.map(
+        (u, i) => [u, i / (BOUNDARY_SAMPLES - 1)]
+    );
     this.projPath = rdp(pts, PROJECT_TOL);
 }
 
