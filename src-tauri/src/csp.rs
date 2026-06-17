@@ -5,18 +5,47 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tauri::State;
+use tauri::{Manager, State};
 
 const PROTOCOL_VERSION: &str = "1.0";
 const APP_VERSION: &str = "G#1:2022.12";
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(1500);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+const AUTH_READ_TIMEOUT: Duration = Duration::from_secs(3);
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CspSettings {
+    pub host: String,
+    pub port: u16,
+    pub token: String,
+    pub session_id: String,
+}
+
+impl Default for CspSettings {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 32035,
+            token: String::new(),
+            session_id: String::new(),
+        }
+    }
+}
+
+#[derive(Serialize, Clone)]
+pub struct CspStatus {
+    pub connected: bool,
+    // "Unknown" = authenticated OK; anything else = error detail; empty = never tried.
+    pub reason: String,
+}
 
 #[derive(Default)]
 struct Conn {
     stream: Option<TcpStream>,
     serial: u64,
+    auth_reason: String,
 }
 
 /// Shared CSP connection handle stored as Tauri managed state.
@@ -25,28 +54,23 @@ pub struct CspState {
     conn: Arc<Mutex<Conn>>,
 }
 
-struct Config {
-    host: String,
-    port: u16,
-    token: String,
-    session_id: String,
+fn settings_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("settings.json"))
 }
 
-fn load_config() -> Result<Config, String> {
-    let port: u16 = std::env::var("CSP_PORT")
-        .map_err(|_| "CSP_PORT not set in .env".to_string())?
-        .trim()
-        .parse()
-        .map_err(|_| "CSP_PORT in .env is not a valid port number".to_string())?;
-    let token = std::env::var("CSP_TOKEN").map_err(|_| "CSP_TOKEN not set in .env".to_string())?;
-    let session_id = std::env::var("CSP_SESSION_ID").map_err(|_| "CSP_SESSION_ID not set in .env".to_string())?;
-    let host = std::env::var("CSP_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    Ok(Config {
-        host,
-        port,
-        token,
-        session_id,
-    })
+fn load_settings(app: &tauri::AppHandle) -> CspSettings {
+    settings_path(app)
+        .and_then(|p| std::fs::read_to_string(p).map_err(|e| e.to_string()))
+        .and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))
+        .unwrap_or_default()
+}
+
+fn save_settings(app: &tauri::AppHandle, settings: &CspSettings) -> Result<(), String> {
+    let path = settings_path(app)?;
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
 }
 
 fn frame(command: &str, serial: u64, detail: &str) -> Vec<u8> {
@@ -64,50 +88,103 @@ fn frame(command: &str, serial: u64, detail: &str) -> Vec<u8> {
     buf
 }
 
-fn connect_blocking(conn: &Mutex<Conn>) -> Result<(), String> {
-    let cfg = load_config()?;
-    let addr = format!("{}:{}", cfg.host, cfg.port)
-        .to_socket_addrs()
-        .map_err(|e| format!("resolve {}:{}: {e}", cfg.host, cfg.port))?
-        .next()
-        .ok_or_else(|| "could not resolve CSP address".to_string())?;
+// Read one CSP message (terminated by 0x1e 0x00) and return AuthErrorReason.
+fn read_auth_reason(stream: &mut TcpStream) -> String {
+    stream.set_read_timeout(Some(AUTH_READ_TIMEOUT)).ok();
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 4096];
+    loop {
+        match stream.read(&mut tmp) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&tmp[..n]);
+                if buf.len() >= 2 && buf[buf.len() - 2] == 0x1e && *buf.last().unwrap() == 0x00 {
+                    break;
+                }
+            }
+        }
+    }
+    stream.set_read_timeout(None).ok();
 
-    let mut stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
-        .map_err(|e| format!("connect {addr}: {e}"))?;
+    let raw = String::from_utf8_lossy(&buf);
+    for segment in raw.split('\x1e') {
+        let s = segment.trim_start_matches(|c| c == '\x01' || c == '$');
+        if let Some(json_str) = s.strip_prefix("detail=") {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+                if let Some(reason) = v.get("AuthErrorReason").and_then(|r| r.as_str()) {
+                    return reason.to_string();
+                }
+            }
+        }
+    }
+    "NoResponse".to_string()
+}
+
+fn do_connect(conn: &Mutex<Conn>, settings: CspSettings) -> CspStatus {
+    let addr = match format!("{}:{}", settings.host, settings.port)
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut it| it.next())
+    {
+        Some(a) => a,
+        None => {
+            let reason = format!("Cannot resolve {}:{}", settings.host, settings.port);
+            conn.lock().unwrap().auth_reason = reason.clone();
+            return CspStatus { connected: false, reason };
+        }
+    };
+
+    let mut stream = match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
+        Ok(s) => s,
+        Err(e) => {
+            let reason = format!("Connection refused: {e}");
+            conn.lock().unwrap().auth_reason = reason.clone();
+            return CspStatus { connected: false, reason };
+        }
+    };
     stream.set_nodelay(true).ok();
     stream.set_write_timeout(Some(WRITE_TIMEOUT)).ok();
 
-    if let Ok(mut rx) = stream.try_clone() {
-        std::thread::spawn(move || {
-            let mut buf = [0u8; 2048];
-            loop {
-                match rx.read(&mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
-                }
-            }
-        });
+    let detail = json!([APP_VERSION, settings.token, settings.session_id]).to_string();
+    if let Err(e) = stream.write_all(&frame("Authenticate", 0, &detail)) {
+        let reason = format!("Send failed: {e}");
+        conn.lock().unwrap().auth_reason = reason.clone();
+        return CspStatus { connected: false, reason };
     }
 
-    let detail = json!([APP_VERSION, cfg.token, cfg.session_id]).to_string();
-    stream
-        .write_all(&frame("Authenticate", 0, &detail))
-        .map_err(|e| format!("authenticate: {e}"))?;
+    let auth_reason = read_auth_reason(&mut stream);
+    let auth_ok = auth_reason == "Unknown";
+
+    if auth_ok {
+        if let Ok(mut rx) = stream.try_clone() {
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 2048];
+                loop {
+                    match rx.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {}
+                    }
+                }
+            });
+        }
+    }
 
     let mut guard = conn.lock().unwrap();
-    guard.stream = Some(stream);
+    guard.stream = if auth_ok { Some(stream) } else { None };
     guard.serial = 1;
-    Ok(())
+    guard.auth_reason = auth_reason.clone();
+
+    CspStatus { connected: auth_ok, reason: auth_reason }
 }
 
 /// Open or reopen the connection and authenticate.
 #[tauri::command]
-pub async fn csp_connect(state: State<'_, CspState>) -> Result<(), String> {
+pub async fn csp_connect(state: State<'_, CspState>, app: tauri::AppHandle) -> Result<CspStatus, String> {
     let conn = state.conn.clone();
-    // The connect + handshake is blocking; keep it off the UI thread.
-    tauri::async_runtime::spawn_blocking(move || connect_blocking(&conn))
+    let settings = load_settings(&app);
+    Ok(tauri::async_runtime::spawn_blocking(move || do_connect(&conn, settings))
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?)
 }
 
 /// Set current color; h/s/l are 0.0..=1.0, CSP expects the full u32 range.
@@ -139,12 +216,27 @@ pub fn csp_set_color(state: State<CspState>, h: f64, s: f64, l: f64) -> Result<(
         Err(e) => {
             // Drop the dead socket so the frontend can trigger a reconnect.
             guard.stream = None;
+            guard.auth_reason = "Disconnected".to_string();
             Err(format!("send: {e}"))
         }
     }
 }
 
 #[tauri::command]
-pub fn csp_connected(state: State<CspState>) -> bool {
-    state.conn.lock().unwrap().stream.is_some()
+pub fn csp_get_status(state: State<CspState>) -> CspStatus {
+    let guard = state.conn.lock().unwrap();
+    CspStatus {
+        connected: guard.stream.is_some(),
+        reason: guard.auth_reason.clone(),
+    }
+}
+
+#[tauri::command]
+pub fn csp_get_settings(app: tauri::AppHandle) -> CspSettings {
+    load_settings(&app)
+}
+
+#[tauri::command]
+pub fn csp_save_settings(app: tauri::AppHandle, settings: CspSettings) -> Result<(), String> {
+    save_settings(&app, &settings)
 }

@@ -6,19 +6,37 @@ import { oklchToHsl, type Oklch } from "./color";
 const MIN_INTERVAL_MS = 40;
 const RECONNECT_MS = 3000;
 
+export interface CspStatus {
+  connected: boolean;
+  reason: string; // "Unknown" = OK; anything else = error detail; "" = never tried
+}
+
 let connected = false;
 let pending: Oklch | null = null;
 let sending = false;
 let lastSent = 0;
+let statusCallback: (s: CspStatus) => void = () => {};
+
+export function setStatusCallback(cb: (s: CspStatus) => void): void {
+  statusCallback = cb;
+}
+
+function applyStatus(s: CspStatus): void {
+  connected = s.connected;
+  statusCallback(s);
+}
 
 async function connect(): Promise<void> {
   try {
-    await invoke("csp_connect");
-    connected = true;
+    const status = await invoke<CspStatus>("csp_connect");
+    applyStatus(status);
   } catch (e) {
-    connected = false;
-    console.warn("CSP connect failed:", e);
+    applyStatus({ connected: false, reason: String(e) });
   }
+}
+
+export function reconnect(): void {
+  void connect();
 }
 
 async function flush(): Promise<void> {
@@ -42,7 +60,8 @@ async function flush(): Promise<void> {
       await invoke("csp_set_color", { h, s, l });
     }
   } catch (e) {
-    connected = false; // a failed send drops the socket in Rust
+    // a failed send drops the socket in Rust
+    applyStatus({ connected: false, reason: "Send failed" });
     console.warn("CSP set color failed:", e);
   } finally {
     sending = false;

@@ -10,9 +10,13 @@
 
   <body>
     <div id="titlebar" data-tauri-drag-region>
-      <span class="title" data-tauri-drag-region>OKLCH</span>
+      <div class="title-group" data-tauri-drag-region>
+        <span class="title">OKLCH</span>
+        <span id="csp-dot" title="CSP: not connected"></span>
+      </div>
       <div class="win-buttons">
         <button id="lock-btn" class="win-btn" title="Lock selection to in-gamut: on">🔒</button>
+        <button id="settings-btn" class="win-btn" title="CSP settings">⚙</button>
         <button id="pin-btn" class="win-btn active" title="Always on top: on">⊙</button>
         <button id="reset-btn" class="win-btn" title="Reset window size">▢</button>
         <button id="min-btn" class="win-btn" title="Minimize">–</button>
@@ -28,6 +32,36 @@
       <span id="swatch"></span>
       <span id="hex">#000000</span>
       <span id="copy-hint">click to copy</span>
+    </div>
+
+    <!-- Settings panel (slides up over picker + footer) -->
+    <div id="settings-panel">
+      <div class="s-header">
+        <span>CSP Connection</span>
+        <button id="s-close" class="win-btn" title="Close">✕</button>
+      </div>
+      <div class="s-body">
+        <label class="s-row">
+          <span>Host</span>
+          <input id="s-host" type="text" spellcheck="false" placeholder="127.0.0.1" />
+        </label>
+        <label class="s-row">
+          <span>Port</span>
+          <input id="s-port" type="number" min="1" max="65535" placeholder="32035" />
+        </label>
+        <label class="s-row">
+          <span>Token</span>
+          <input id="s-token" type="text" spellcheck="false" placeholder="paste token here" />
+        </label>
+        <label class="s-row">
+          <span>Session&nbsp;ID</span>
+          <input id="s-session" type="text" spellcheck="false" placeholder="paste session ID here" />
+        </label>
+      </div>
+      <div class="s-footer">
+        <span class="s-hint">Ctrl+Enter to save</span>
+        <button id="s-save">Save &amp; Reconnect</button>
+      </div>
     </div>
 
     <!-- Frameless resize handles -->

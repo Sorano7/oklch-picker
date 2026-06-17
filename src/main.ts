@@ -1,7 +1,8 @@
 import { Picker } from "./picker";
 import { oklchToHex, type Oklch } from "./color";
 import { initWindowControls } from "./window";
-import { startCsp, pushColor } from "./csp";
+import { startCsp, pushColor, reconnect, setStatusCallback, type CspStatus } from "./csp";
+import { initSettings } from "./settings";
 
 const INITIAL: Oklch = { l: 0.72, c: 0.15, h: 30 };
 
@@ -24,7 +25,6 @@ async function copyText(text: string): Promise<void> {
 
 window.addEventListener("DOMContentLoaded", () => {
   initWindowControls();
-  startCsp();
 
   const canvas = document.querySelector<HTMLCanvasElement>("#picker-canvas")!;
   const wrap = document.querySelector<HTMLElement>("#picker-wrap")!;
@@ -32,6 +32,20 @@ window.addEventListener("DOMContentLoaded", () => {
   const swatch = document.querySelector<HTMLElement>("#swatch")!;
   const footer = document.querySelector<HTMLElement>("#footer")!;
   const hint = document.querySelector<HTMLElement>("#copy-hint")!;
+  const dot = document.querySelector<HTMLElement>("#csp-dot")!;
+
+  setStatusCallback((s: CspStatus) => {
+    dot.classList.toggle("connected", s.connected);
+    dot.classList.toggle("error", !s.connected && s.reason !== "");
+    const label = s.connected
+      ? "CSP: connected"
+      : s.reason
+        ? `CSP: ${s.reason}`
+        : "CSP: not connected";
+    dot.title = label;
+  });
+
+  initSettings(() => reconnect());
 
   const picker = new Picker(canvas, INITIAL);
   picker.onChange = (c) => {
@@ -70,6 +84,8 @@ window.addEventListener("DOMContentLoaded", () => {
     fit();
     picker.onChange(picker.getColor());
   });
+
+  startCsp();
 
   let hintTimer = 0;
   footer.addEventListener("click", async () => {
