@@ -1,6 +1,6 @@
 # OKLCH Picker
 
-An OKLCH-based color picker. OKLCH perserves perceived lightness when the hue changes, which can be helpful for color-picking.
+An OKLCH-based color picker built with Tauri.
 
 Can connect to Clip Studio Paint via Companion Mode, or you can copy-paste the hex value into the program of your choice.
 
@@ -20,7 +20,7 @@ pnpm tauri build
 ```
 
 ## CSP Connection
-To connect to CSP you will need to first connect from a real device first and capture the handshake:
+To connect to CSP you will need to first connect from a real device and capture the handshake:
 
 ```
 .$tcp_remote_command_protocol_version=1.0.$command=Authenticate.$serial=0
