@@ -89,6 +89,41 @@ export function oklchToHsl(
     return { h: hue, s, l: li };
 }
 
+// HSL (all 0..1) to OKLCH; inverse of oklchToHsl.
+export function hslToOklch(h: number, s: number, l: number): Oklch {
+    // HSL → sRGB
+    const chroma = (1 - Math.abs(2 * l - 1)) * s;
+    const hp = h * 6;
+    const x = chroma * (1 - Math.abs(hp % 2 - 1));
+    const m = l - chroma / 2;
+    let r = 0, g = 0, b = 0;
+    if (hp < 1)      { r = chroma; g = x; }
+    else if (hp < 2) { r = x;      g = chroma; }
+    else if (hp < 3) {             g = chroma; b = x; }
+    else if (hp < 4) {             g = x;      b = chroma; }
+    else if (hp < 5) { r = x;                  b = chroma; }
+    else             { r = chroma;              b = x; }
+    r += m; g += m; b += m;
+
+    // sRGB → linear
+    const lin = (v: number) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    const lr = lin(r), lg = lin(g), lb = lin(b);
+
+    // Linear sRGB → OKLab
+    const l_ = Math.cbrt(0.4121656120 * lr + 0.5362752080 * lg + 0.0514575653 * lb);
+    const m_ = Math.cbrt(0.2118591070 * lr + 0.6807189584 * lg + 0.1074065790 * lb);
+    const s_ = Math.cbrt(0.0883097947 * lr + 0.2818474174 * lg + 0.6302613616 * lb);
+
+    const L  =  0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_;
+    const a  =  1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_;
+    const bk =  0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_;
+
+    const C = Math.sqrt(a * a + bk * bk);
+    let H = Math.atan2(bk, a) * 180 / Math.PI;
+    if (H < 0) H += 360;
+    return { l: L, c: C, h: H };
+}
+
 export function oklchToHex(l: number, c: number, h: number): string {
     const [r, g, b] = oklchToSrgb255(l, c, h);
     return (

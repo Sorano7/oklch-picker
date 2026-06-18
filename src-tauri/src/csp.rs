@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 const PROTOCOL_VERSION: &str = "1.0";
 const APP_VERSION: &str = "G#1:2022.12";
@@ -46,6 +46,7 @@ struct Conn {
     stream: Option<TcpStream>,
     serial: u64,
     auth_reason: String,
+    color_index: u8,
 }
 
 /// Shared CSP connection handle stored as Tauri managed state.
@@ -120,7 +121,81 @@ fn read_auth_reason(stream: &mut TcpStream) -> String {
     "NoResponse".to_string()
 }
 
-fn do_connect(conn: &Mutex<Conn>, settings: CspSettings) -> CspStatus {
+fn handle_incoming_frame(data: &[u8], conn: &Arc<Mutex<Conn>>, app: &tauri::AppHandle) {
+    let raw = String::from_utf8_lossy(data);
+    let mut command = String::new();
+    let mut detail_str = String::new();
+
+    for segment in raw.split('\x1e') {
+        let s = segment.trim_start_matches(|c: char| c == '\x01' || c == '$');
+        if let Some(v) = s.strip_prefix("command=") {
+            command = v.to_string();
+        } else if let Some(v) = s.strip_prefix("detail=") {
+            detail_str = v.to_string();
+        }
+    }
+
+    if command != "SyncColorCircleUIState" || detail_str.is_empty() {
+        return;
+    }
+
+    let Ok(detail) = serde_json::from_str::<serde_json::Value>(&detail_str) else {
+        return;
+    };
+
+    if detail.get("IsCurrentColorTransparent").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return;
+    }
+
+    let color_index = detail
+        .get("CurrentColorIndex")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u8;
+
+    let from_u32 = |key: &str| -> f64 {
+        detail
+            .get(key)
+            .and_then(|v| v.as_u64())
+            .map(|n| n as f64 / 4294967295.0)
+            .unwrap_or(0.0)
+    };
+
+    let (h, s, l) = if color_index == 0 {
+        (from_u32("HLSColorMainH"), from_u32("HLSColorMainS"), from_u32("HLSColorMainL"))
+    } else {
+        (from_u32("HLSColorSubH"), from_u32("HLSColorSubS"), from_u32("HLSColorSubL"))
+    };
+
+    conn.lock().unwrap().color_index = color_index;
+
+    let _ = app.emit("csp-color-changed", json!({ "h": h, "s": s, "l": l, "colorIndex": color_index }));
+}
+
+fn read_loop(mut rx: TcpStream, conn: Arc<Mutex<Conn>>, app: tauri::AppHandle) {
+    let mut buf: Vec<u8> = Vec::new();
+    let mut tmp = [0u8; 4096];
+    loop {
+        match rx.read(&mut tmp) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&tmp[..n]);
+                loop {
+                    // Frames are terminated by 0x1e 0x00.
+                    match buf.windows(2).position(|w| w[0] == 0x1e && w[1] == 0x00) {
+                        None => break,
+                        Some(end) => {
+                            let frame_data = buf[..end].to_vec();
+                            buf.drain(..end + 2);
+                            handle_incoming_frame(&frame_data, &conn, &app);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn do_connect(conn: Arc<Mutex<Conn>>, settings: CspSettings, app: tauri::AppHandle) -> CspStatus {
     let addr = match format!("{}:{}", settings.host, settings.port)
         .to_socket_addrs()
         .ok()
@@ -156,16 +231,9 @@ fn do_connect(conn: &Mutex<Conn>, settings: CspSettings) -> CspStatus {
     let auth_ok = auth_reason == "Unknown";
 
     if auth_ok {
-        if let Ok(mut rx) = stream.try_clone() {
-            std::thread::spawn(move || {
-                let mut buf = [0u8; 2048];
-                loop {
-                    match rx.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
-                        Ok(_) => {}
-                    }
-                }
-            });
+        if let Ok(rx) = stream.try_clone() {
+            let conn_for_reader = Arc::clone(&conn);
+            std::thread::spawn(move || read_loop(rx, conn_for_reader, app));
         }
     }
 
@@ -182,7 +250,7 @@ fn do_connect(conn: &Mutex<Conn>, settings: CspSettings) -> CspStatus {
 pub async fn csp_connect(state: State<'_, CspState>, app: tauri::AppHandle) -> Result<CspStatus, String> {
     let conn = state.conn.clone();
     let settings = load_settings(&app);
-    Ok(tauri::async_runtime::spawn_blocking(move || do_connect(&conn, settings))
+    Ok(tauri::async_runtime::spawn_blocking(move || do_connect(conn, settings, app))
         .await
         .map_err(|e| e.to_string())?)
 }
@@ -191,13 +259,14 @@ pub async fn csp_connect(state: State<'_, CspState>, app: tauri::AppHandle) -> R
 #[tauri::command]
 pub fn csp_set_color(state: State<CspState>, h: f64, s: f64, l: f64) -> Result<(), String> {
     let to_u32 = |x: f64| -> u64 { (x.clamp(0.0, 1.0) * 4294967295.0).round() as u64 };
+    let color_index = state.conn.lock().unwrap().color_index;
     let detail = json!({
         "HLSColorH": to_u32(h),
         "HLSColorS": to_u32(s),
         "HLSColorL": to_u32(l),
         "ColorSpaceKind": "HLS",
         "IsColorTransparent": false,
-        "ColorIndex": 0
+        "ColorIndex": color_index
     })
     .to_string();
 
@@ -215,6 +284,29 @@ pub fn csp_set_color(state: State<CspState>, h: f64, s: f64, l: f64) -> Result<(
         }
         Err(e) => {
             // Drop the dead socket so the frontend can trigger a reconnect.
+            guard.stream = None;
+            guard.auth_reason = "Disconnected".to_string();
+            Err(format!("send: {e}"))
+        }
+    }
+}
+
+/// Send a SyncColorCircleUIState request; the response arrives as a "csp-color-changed" event.
+#[tauri::command]
+pub fn csp_poll_color(state: State<CspState>) -> Result<(), String> {
+    let mut guard = state.conn.lock().unwrap();
+    let serial = guard.serial;
+    let msg = frame("SyncColorCircleUIState", serial, "");
+    let result = match guard.stream.as_mut() {
+        Some(stream) => stream.write_all(&msg),
+        None => return Err("not connected".to_string()),
+    };
+    match result {
+        Ok(()) => {
+            guard.serial += 1;
+            Ok(())
+        }
+        Err(e) => {
             guard.stream = None;
             guard.auth_reason = "Disconnected".to_string();
             Err(format!("send: {e}"))

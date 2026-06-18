@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Picker } from "./picker";
 import { oklchToHex, type Oklch } from "./color";
 import { initWindowControls } from "./window";
-import { startCsp, pushColor, reconnect, setStatusCallback, type CspStatus } from "./csp";
+import { startCsp, pushColor, reconnect, setStatusCallback, setColorFromCspCallback, type CspStatus } from "./csp";
 import { initSettings } from "./settings";
 
 interface SavedState {
@@ -117,14 +117,22 @@ async function init(): Promise<void> {
     picker.setLocked(state.locked);
 
     let initialized = false;
+    let updatingFromCsp = false;
+
     picker.onChange = (c) => {
         state.color = c;
         const hex = oklchToHex(c.l, c.c, c.h);
         hexEl.textContent = hex;
         swatch.style.background = hex;
-        pushColor(c);
+        if (!updatingFromCsp) pushColor(c);
         if (initialized) scheduleSave();
     };
+
+    setColorFromCspCallback((c) => {
+        updatingFromCsp = true;
+        picker.setColor(c);
+        updatingFromCsp = false;
+    });
 
     const lockBtn = document.querySelector<HTMLButtonElement>("#lock-btn")!;
     lockBtn.classList.toggle("active", state.locked);
@@ -156,7 +164,7 @@ async function init(): Promise<void> {
         initialized = true;
     });
 
-    startCsp();
+    void startCsp();
 
     let hintTimer = 0;
     footer.addEventListener("click", async () => {

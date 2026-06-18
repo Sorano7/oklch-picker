@@ -15,6 +15,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             csp::csp_connect,
             csp::csp_set_color,
+            csp::csp_poll_color,
             csp::csp_get_status,
             csp::csp_get_settings,
             csp::csp_save_settings,

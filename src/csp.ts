@@ -1,14 +1,23 @@
 // Frontend side of the Clip Studio Paint bridge.
 
 import { invoke } from "@tauri-apps/api/core";
-import { oklchToHsl, type Oklch } from "./color";
+import { listen } from "@tauri-apps/api/event";
+import { oklchToHsl, hslToOklch, type Oklch } from "./color";
 
 const MIN_INTERVAL_MS = 40;
 const RECONNECT_MS = 3000;
+const SYNC_INTERVAL_MS = 200;
 
 export interface CspStatus {
     connected: boolean;
     reason: string; // "Unknown" = OK; anything else = error detail; "" = never tried
+}
+
+interface CspColorEvent {
+    h: number;
+    s: number;
+    l: number;
+    colorIndex: number;
 }
 
 let connected = false;
@@ -16,9 +25,14 @@ let pending: Oklch | null = null;
 let sending = false;
 let lastSent = 0;
 let statusCallback: (s: CspStatus) => void = () => {};
+let colorFromCspCallback: ((c: Oklch) => void) | null = null;
 
 export function setStatusCallback(cb: (s: CspStatus) => void): void {
     statusCallback = cb;
+}
+
+export function setColorFromCspCallback(cb: (c: Oklch) => void): void {
+    colorFromCspCallback = cb;
 }
 
 function applyStatus(s: CspStatus): void {
@@ -75,9 +89,23 @@ export function pushColor(color: Oklch): void {
     void flush();
 }
 
-export function startCsp(): void {
+export async function startCsp(): Promise<void> {
+    await listen<CspColorEvent>("csp-color-changed", (event) => {
+        if (!colorFromCspCallback) return;
+        const { h, s, l } = event.payload;
+        colorFromCspCallback(hslToOklch(h, s, l));
+    });
+
     void connect();
+
     setInterval(() => {
         if (!connected) void connect();
     }, RECONNECT_MS);
+
+    setInterval(() => {
+        if (!connected) return;
+        invoke("csp_poll_color").catch((e: unknown) => {
+            applyStatus({ connected: false, reason: String(e) });
+        });
+    }, SYNC_INTERVAL_MS);
 }
