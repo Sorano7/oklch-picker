@@ -16,6 +16,7 @@ pub fn run() {
             csp::csp_connect,
             csp::csp_set_color,
             csp::csp_poll_color,
+            csp::csp_heartbeat,
             csp::csp_get_status,
             csp::csp_get_settings,
             csp::csp_save_settings,

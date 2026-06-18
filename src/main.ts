@@ -128,9 +128,25 @@ async function init(): Promise<void> {
         if (initialized) scheduleSave();
     };
 
-    setColorFromCspCallback((c) => {
+    setColorFromCspCallback((incoming) => {
+        const cur = picker.getColor();
+
+        // When chroma is negligible the hue is undefined (e.g. black → CSP reports H=0).
+        // Preserve the user's current hue so the ring doesn't jump.
+        const next: typeof incoming = incoming.c < 0.005
+            ? { ...incoming, h: cur.h }
+            : incoming;
+
+        // Skip if the color hasn't changed meaningfully; catches CSP echoing back what we
+        // just sent (roundtrip through HSL quantisation keeps the diff well below 0.002).
+        const rawDh = Math.abs(next.h - cur.h) % 360;
+        const dh = rawDh > 180 ? 360 - rawDh : rawDh;
+        if (Math.abs(next.l - cur.l) < 0.002 &&
+            Math.abs(next.c - cur.c) < 0.002 &&
+            (next.c < 0.005 || dh < 0.5)) return;
+
         updatingFromCsp = true;
-        picker.setColor(c);
+        picker.setColor(next);
         updatingFromCsp = false;
     });
 

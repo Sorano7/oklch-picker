@@ -314,6 +314,30 @@ pub fn csp_poll_color(state: State<CspState>) -> Result<(), String> {
     }
 }
 
+/// Reset CSP's idle timer so it keeps the companion session alive.
+#[tauri::command]
+pub fn csp_heartbeat(state: State<CspState>) -> Result<(), String> {
+    let detail = json!({ "IdleTimerResetRequested": true }).to_string();
+    let mut guard = state.conn.lock().unwrap();
+    let serial = guard.serial;
+    let msg = frame("TellHeartbeat", serial, &detail);
+    let result = match guard.stream.as_mut() {
+        Some(stream) => stream.write_all(&msg),
+        None => return Err("not connected".to_string()),
+    };
+    match result {
+        Ok(()) => {
+            guard.serial += 1;
+            Ok(())
+        }
+        Err(e) => {
+            guard.stream = None;
+            guard.auth_reason = "Disconnected".to_string();
+            Err(format!("send: {e}"))
+        }
+    }
+}
+
 #[tauri::command]
 pub fn csp_get_status(state: State<CspState>) -> CspStatus {
     let guard = state.conn.lock().unwrap();

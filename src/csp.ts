@@ -7,6 +7,7 @@ import { oklchToHsl, hslToOklch, type Oklch } from "./color";
 const MIN_INTERVAL_MS = 40;
 const RECONNECT_MS = 3000;
 const SYNC_INTERVAL_MS = 200;
+const HEARTBEAT_MS = 1000;
 
 export interface CspStatus {
     connected: boolean;
@@ -92,6 +93,8 @@ export function pushColor(color: Oklch): void {
 export async function startCsp(): Promise<void> {
     await listen<CspColorEvent>("csp-color-changed", (event) => {
         if (!colorFromCspCallback) return;
+        // A user change is queued or in flight — don't let a stale poll response overwrite it.
+        if (pending !== null || sending) return;
         const { h, s, l } = event.payload;
         colorFromCspCallback(hslToOklch(h, s, l));
     });
@@ -108,4 +111,11 @@ export async function startCsp(): Promise<void> {
             applyStatus({ connected: false, reason: String(e) });
         });
     }, SYNC_INTERVAL_MS);
+
+    setInterval(() => {
+        if (!connected) return;
+        invoke("csp_heartbeat").catch((e: unknown) => {
+            applyStatus({ connected: false, reason: String(e) });
+        });
+    }, HEARTBEAT_MS);
 }
