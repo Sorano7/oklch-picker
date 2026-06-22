@@ -100,7 +100,9 @@ async function init(): Promise<void> {
     const hint = document.querySelector<HTMLElement>("#copy-hint")!;
     const dot = document.querySelector<HTMLElement>("#csp-dot")!;
 
+    let cspConnected = false;
     setStatusCallback((s: CspStatus) => {
+        cspConnected = s.connected;
         dot.classList.toggle("connected", s.connected);
         dot.classList.toggle("error", !s.connected && s.reason !== "");
         const label = s.connected
@@ -159,6 +161,10 @@ async function init(): Promise<void> {
         lockBtn.classList.toggle("active", state.locked);
         lockBtn.title = `Lock to in-gamut: ${state.locked ? "on" : "off"}`;
         void flushSave();
+    });
+
+    wrap.addEventListener("pointerleave", () => {
+        if (cspConnected && state.alwaysOnTop) void invoke("focus_csp_window");
     });
 
     const fit = () => {

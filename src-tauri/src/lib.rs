@@ -1,5 +1,6 @@
 mod app_state;
 mod csp;
+mod focus;
 
 use csp::CspState;
 
@@ -22,6 +23,7 @@ pub fn run() {
             csp::csp_save_settings,
             app_state::state_load,
             app_state::state_save,
+            focus::focus_csp_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

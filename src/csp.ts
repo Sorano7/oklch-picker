@@ -8,6 +8,9 @@ const MIN_INTERVAL_MS = 40;
 const RECONNECT_MS = 3000;
 const SYNC_INTERVAL_MS = 200;
 const HEARTBEAT_MS = 1000;
+// Must exceed SYNC_INTERVAL_MS so stale in-flight poll responses are suppressed
+// before we start accepting colors from CSP again after a user change.
+const PUSH_COOLDOWN_MS = 300;
 
 export interface CspStatus {
     connected: boolean;
@@ -25,6 +28,7 @@ let connected = false;
 let pending: Oklch | null = null;
 let sending = false;
 let lastSent = 0;
+let lastPushAt = -Infinity;
 let statusCallback: (s: CspStatus) => void = () => {};
 let colorFromCspCallback: ((c: Oklch) => void) | null = null;
 
@@ -66,6 +70,7 @@ async function flush(): Promise<void> {
     const color = pending;
     pending = null;
     sending = true;
+    lastPushAt = performance.now();
     lastSent = performance.now();
 
     try {
@@ -93,8 +98,9 @@ export function pushColor(color: Oklch): void {
 export async function startCsp(): Promise<void> {
     await listen<CspColorEvent>("csp-color-changed", (event) => {
         if (!colorFromCspCallback) return;
-        // A user change is queued or in flight — don't let a stale poll response overwrite it.
-        if (pending !== null || sending) return;
+        // A user change is queued, in flight, or recently completed — suppress stale poll
+        // responses that were generated before CSP processed our SetCurrentColor command.
+        if (pending !== null || sending || performance.now() - lastPushAt < PUSH_COOLDOWN_MS) return;
         const { h, s, l } = event.payload;
         colorFromCspCallback(hslToOklch(h, s, l));
     });
